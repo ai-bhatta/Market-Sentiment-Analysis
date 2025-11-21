@@ -97,12 +97,6 @@ with st.sidebar:
 
     if st.button("Fetch Live News", type="primary"):
         with st.spinner("Fetching live financial news..."):
-            # Reset session before new operations
-            try:
-                db.reset_session()
-            except Exception:
-                pass  # Ignore errors if session doesn't exist yet
-
             # Use RSS feeds (no API keys needed for demo)
             df = fetcher.fetch_rss_fallback()
 
@@ -146,12 +140,6 @@ with st.sidebar:
             }
 
             with st.spinner("Fetching from multiple sources..."):
-                # Reset session before new operations
-                try:
-                    db.reset_session()
-                except Exception:
-                    pass  # Ignore errors if session doesn't exist yet
-
                 df = fetcher.fetch_all(api_keys=api_keys, days=7)
 
                 if not df.empty:
@@ -193,13 +181,7 @@ with st.sidebar:
 if page == "Dashboard":
     st.header("Current Market Sentiment")
 
-    # Reset session before operations to avoid stale state
-    try:
-        db.reset_session()
-    except Exception:
-        pass  # Ignore errors if session doesn't exist yet
-
-    # Get latest data
+    # Get latest data (session is automatically reset inside the method)
     latest = db.get_latest_index()
 
     if latest:
@@ -307,13 +289,7 @@ elif page == "Live News Feed":
 
     st.markdown("Recent articles analyzed for sentiment:")
 
-    # Reset session before operations to avoid stale state
-    try:
-        db.reset_session()
-    except Exception:
-        pass  # Ignore errors if session doesn't exist yet
-
-    # Get recent records
+    # Get recent records (session is automatically reset inside the method)
     records = db.get_latest_records(limit=50)
 
     if records:
@@ -363,12 +339,7 @@ elif page == "Historical Analysis":
 
     days = st.slider("Select time period (days)", 7, 90, 30)
 
-    # Reset session before operations to avoid stale state
-    try:
-        db.reset_session()
-    except Exception:
-        pass  # Ignore errors if session doesn't exist yet
-
+    # Get historical data (session is automatically reset inside the method)
     history = db.get_historical_index(days=days)
 
     if history and len(history) > 0:
@@ -437,12 +408,7 @@ elif page == "Source Breakdown":
 
     days = st.slider("Select time period (days)", 7, 30, 7)
 
-    # Reset session before operations to avoid stale state
-    try:
-        db.reset_session()
-    except Exception:
-        pass  # Ignore errors if session doesn't exist yet
-
+    # Get source data (session is automatically reset inside the method)
     by_source = db.get_sentiment_by_source(days=days)
 
     if by_source:
