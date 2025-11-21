@@ -60,10 +60,32 @@ class SentimentDatabase:
 
     def __init__(self, db_path='sentiment_data.db'):
         """Initialize database connection"""
-        self.engine = create_engine(f'sqlite:///{db_path}')
+        self.engine = create_engine(f'sqlite:///{db_path}', pool_pre_ping=True)
         Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        self.Session = sessionmaker(bind=self.engine)
+        self._session = None
+
+    @property
+    def session(self):
+        """Get or create a session with automatic rollback on error"""
+        if self._session is None:
+            self._session = self.Session()
+        return self._session
+
+    def _handle_error(self, error):
+        """Handle database errors by rolling back the session"""
+        if self._session:
+            self._session.rollback()
+        raise error
+
+    def reset_session(self):
+        """Close and reset the session"""
+        if self._session:
+            try:
+                self._session.close()
+            except Exception:
+                pass
+            self._session = None
 
     def save_sentiment_records(self, df):
         """
@@ -72,24 +94,27 @@ class SentimentDatabase:
         Args:
             df: DataFrame with sentiment analysis
         """
-        records = []
-        for _, row in df.iterrows():
-            record = SentimentRecord(
-                date=row.get('date', datetime.now()),
-                source=row.get('source', 'Unknown'),
-                headline=row.get('text', '')[:1000],  # Truncate if too long
-                sentiment_label=row.get('sentiment_label', 'neutral'),
-                sentiment_score=row.get('sentiment_score', 0.0),
-                positive_score=row.get('positive_score', 0.0),
-                negative_score=row.get('negative_score', 0.0),
-                neutral_score=row.get('neutral_score', 0.0),
-                compound_score=row.get('compound_score', 0.0)
-            )
-            records.append(record)
+        try:
+            records = []
+            for _, row in df.iterrows():
+                record = SentimentRecord(
+                    date=row.get('date', datetime.now()),
+                    source=row.get('source', 'Unknown'),
+                    headline=row.get('text', '')[:1000],  # Truncate if too long
+                    sentiment_label=row.get('sentiment_label', 'neutral'),
+                    sentiment_score=row.get('sentiment_score', 0.0),
+                    positive_score=row.get('positive_score', 0.0),
+                    negative_score=row.get('negative_score', 0.0),
+                    neutral_score=row.get('neutral_score', 0.0),
+                    compound_score=row.get('compound_score', 0.0)
+                )
+                records.append(record)
 
-        self.session.bulk_save_objects(records)
-        self.session.commit()
-        print(f"Saved {len(records)} sentiment records to database")
+            self.session.bulk_save_objects(records)
+            self.session.commit()
+            print(f"Saved {len(records)} sentiment records to database")
+        except Exception as e:
+            self._handle_error(e)
 
     def save_daily_index(self, daily_index_df):
         """
@@ -98,45 +123,48 @@ class SentimentDatabase:
         Args:
             daily_index_df: DataFrame with daily indices
         """
-        for _, row in daily_index_df.iterrows():
-            # Check if record exists
-            existing = self.session.query(DailyIndex).filter_by(date=row['date']).first()
+        try:
+            for _, row in daily_index_df.iterrows():
+                # Check if record exists
+                existing = self.session.query(DailyIndex).filter_by(date=row['date']).first()
 
-            label_dist = row.get('label_distribution', {})
-            if isinstance(label_dist, dict):
-                label_dist_json = json.dumps(label_dist)
-            else:
-                label_dist_json = str(label_dist)
+                label_dist = row.get('label_distribution', {})
+                if isinstance(label_dist, dict):
+                    label_dist_json = json.dumps(label_dist)
+                else:
+                    label_dist_json = str(label_dist)
 
-            if existing:
-                # Update existing record
-                existing.sentiment_index = row['sentiment_index']
-                existing.avg_compound = row['avg_compound']
-                existing.avg_positive = row['avg_positive']
-                existing.avg_negative = row['avg_negative']
-                existing.avg_neutral = row['avg_neutral']
-                existing.volatility = row['volatility']
-                existing.momentum = row.get('momentum', 0.0)
-                existing.article_count = row['article_count']
-                existing.label_distribution = label_dist_json
-            else:
-                # Create new record
-                index_record = DailyIndex(
-                    date=row['date'],
-                    sentiment_index=row['sentiment_index'],
-                    avg_compound=row['avg_compound'],
-                    avg_positive=row['avg_positive'],
-                    avg_negative=row['avg_negative'],
-                    avg_neutral=row['avg_neutral'],
-                    volatility=row['volatility'],
-                    momentum=row.get('momentum', 0.0),
-                    article_count=row['article_count'],
-                    label_distribution=label_dist_json
-                )
-                self.session.add(index_record)
+                if existing:
+                    # Update existing record
+                    existing.sentiment_index = row['sentiment_index']
+                    existing.avg_compound = row['avg_compound']
+                    existing.avg_positive = row['avg_positive']
+                    existing.avg_negative = row['avg_negative']
+                    existing.avg_neutral = row['avg_neutral']
+                    existing.volatility = row['volatility']
+                    existing.momentum = row.get('momentum', 0.0)
+                    existing.article_count = row['article_count']
+                    existing.label_distribution = label_dist_json
+                else:
+                    # Create new record
+                    index_record = DailyIndex(
+                        date=row['date'],
+                        sentiment_index=row['sentiment_index'],
+                        avg_compound=row['avg_compound'],
+                        avg_positive=row['avg_positive'],
+                        avg_negative=row['avg_negative'],
+                        avg_neutral=row['avg_neutral'],
+                        volatility=row['volatility'],
+                        momentum=row.get('momentum', 0.0),
+                        article_count=row['article_count'],
+                        label_distribution=label_dist_json
+                    )
+                    self.session.add(index_record)
 
-        self.session.commit()
-        print(f"Saved {len(daily_index_df)} daily index records to database")
+            self.session.commit()
+            print(f"Saved {len(daily_index_df)} daily index records to database")
+        except Exception as e:
+            self._handle_error(e)
 
     def save_source_index(self, source_index_df, date=None):
         """
@@ -146,36 +174,42 @@ class SentimentDatabase:
             source_index_df: DataFrame with source indices
             date: Date for these indices
         """
-        if date is None:
-            date = datetime.now()
+        try:
+            if date is None:
+                date = datetime.now()
 
-        for _, row in source_index_df.iterrows():
-            index_record = SourceIndex(
-                date=date,
-                source=row['source'],
-                sentiment_index=row['sentiment_index'],
-                avg_compound=row['avg_compound'],
-                article_count=row['article_count']
-            )
-            self.session.add(index_record)
+            for _, row in source_index_df.iterrows():
+                index_record = SourceIndex(
+                    date=date,
+                    source=row['source'],
+                    sentiment_index=row['sentiment_index'],
+                    avg_compound=row['avg_compound'],
+                    article_count=row['article_count']
+                )
+                self.session.add(index_record)
 
-        self.session.commit()
-        print(f"Saved {len(source_index_df)} source index records to database")
+            self.session.commit()
+            print(f"Saved {len(source_index_df)} source index records to database")
+        except Exception as e:
+            self._handle_error(e)
 
     def get_latest_index(self):
         """Get the most recent sentiment index"""
-        latest = self.session.query(DailyIndex).order_by(DailyIndex.date.desc()).first()
-        if latest:
-            return {
-                'date': latest.date.isoformat(),
-                'sentiment_index': latest.sentiment_index,
-                'avg_compound': latest.avg_compound,
-                'volatility': latest.volatility,
-                'momentum': latest.momentum,
-                'article_count': latest.article_count,
-                'label_distribution': json.loads(latest.label_distribution) if latest.label_distribution else {}
-            }
-        return None
+        try:
+            latest = self.session.query(DailyIndex).order_by(DailyIndex.date.desc()).first()
+            if latest:
+                return {
+                    'date': latest.date.isoformat(),
+                    'sentiment_index': latest.sentiment_index,
+                    'avg_compound': latest.avg_compound,
+                    'volatility': latest.volatility,
+                    'momentum': latest.momentum,
+                    'article_count': latest.article_count,
+                    'label_distribution': json.loads(latest.label_distribution) if latest.label_distribution else {}
+                }
+            return None
+        except Exception as e:
+            self._handle_error(e)
 
     def get_historical_index(self, days=30):
         """
@@ -187,60 +221,75 @@ class SentimentDatabase:
         Returns:
             list: Historical index data
         """
-        from datetime import timedelta
-        start_date = datetime.now() - timedelta(days=days)
+        try:
+            from datetime import timedelta
+            start_date = datetime.now() - timedelta(days=days)
 
-        records = self.session.query(DailyIndex).filter(
-            DailyIndex.date >= start_date
-        ).order_by(DailyIndex.date.asc()).all()
+            records = self.session.query(DailyIndex).filter(
+                DailyIndex.date >= start_date
+            ).order_by(DailyIndex.date.asc()).all()
 
-        return [{
-            'date': r.date.isoformat(),
-            'sentiment_index': r.sentiment_index,
-            'avg_compound': r.avg_compound,
-            'volatility': r.volatility,
-            'momentum': r.momentum,
-            'article_count': r.article_count
-        } for r in records]
+            return [{
+                'date': r.date.isoformat(),
+                'sentiment_index': r.sentiment_index,
+                'avg_compound': r.avg_compound,
+                'volatility': r.volatility,
+                'momentum': r.momentum,
+                'article_count': r.article_count
+            } for r in records]
+        except Exception as e:
+            self._handle_error(e)
 
     def get_sentiment_by_source(self, days=7):
         """Get recent sentiment breakdown by source"""
-        from datetime import timedelta
-        start_date = datetime.now() - timedelta(days=days)
+        try:
+            from datetime import timedelta
+            start_date = datetime.now() - timedelta(days=days)
 
-        records = self.session.query(SourceIndex).filter(
-            SourceIndex.date >= start_date
-        ).order_by(SourceIndex.date.desc()).all()
+            records = self.session.query(SourceIndex).filter(
+                SourceIndex.date >= start_date
+            ).order_by(SourceIndex.date.desc()).all()
 
-        return [{
-            'date': r.date.isoformat(),
-            'source': r.source,
-            'sentiment_index': r.sentiment_index,
-            'avg_compound': r.avg_compound,
-            'article_count': r.article_count
-        } for r in records]
+            return [{
+                'date': r.date.isoformat(),
+                'source': r.source,
+                'sentiment_index': r.sentiment_index,
+                'avg_compound': r.avg_compound,
+                'article_count': r.article_count
+            } for r in records]
+        except Exception as e:
+            self._handle_error(e)
 
     def get_latest_records(self, limit=50):
         """Get most recent sentiment records"""
-        records = self.session.query(SentimentRecord).order_by(
-            SentimentRecord.created_at.desc()
-        ).limit(limit).all()
+        try:
+            records = self.session.query(SentimentRecord).order_by(
+                SentimentRecord.created_at.desc()
+            ).limit(limit).all()
 
-        return [{
-            'date': r.date.isoformat(),
-            'source': r.source,
-            'headline': r.headline,
-            'sentiment_label': r.sentiment_label,
-            'sentiment_score': r.sentiment_score,
-            'positive_score': r.positive_score,
-            'negative_score': r.negative_score,
-            'neutral_score': r.neutral_score,
-            'compound_score': r.compound_score
-        } for r in records]
+            return [{
+                'date': r.date.isoformat(),
+                'source': r.source,
+                'headline': r.headline,
+                'sentiment_label': r.sentiment_label,
+                'sentiment_score': r.sentiment_score,
+                'positive_score': r.positive_score,
+                'negative_score': r.negative_score,
+                'neutral_score': r.neutral_score,
+                'compound_score': r.compound_score
+            } for r in records]
+        except Exception as e:
+            self._handle_error(e)
 
     def close(self):
         """Close database connection"""
-        self.session.close()
+        if self._session:
+            try:
+                self._session.close()
+            except Exception:
+                pass
+            finally:
+                self._session = None
 
 
 if __name__ == "__main__":
