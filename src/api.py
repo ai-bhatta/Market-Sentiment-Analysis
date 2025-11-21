@@ -17,7 +17,7 @@ app = FastAPI(
 
 # Initialize components
 db = SentimentDatabase()
-analyzer = None  # Lazy load to avoid loading model at startup
+analyzer = None  
 calculator = SentimentIndexCalculator()
 
 
