@@ -6,6 +6,7 @@ import json
 
 Base = declarative_base()
 
+
 class SentimentRecord(Base):
     """Database model for sentiment analysis records"""
     __tablename__ = 'sentiment_records'
@@ -116,56 +117,67 @@ class SentimentDatabase:
         Args:
             daily_index_df: DataFrame with daily indices
         """
-        session = self.get_new_session()
-        try:
-            # Use no_autoflush to prevent premature flushes during queries
-            with session.no_autoflush:
-                for _, row in daily_index_df.iterrows():
-                    # Check if record exists
-                    existing = session.query(DailyIndex).filter_by(date=row['date']).first()
+        for _, row in daily_index_df.iterrows():
+            # Use a fresh session for each row to avoid conflicts
+            session = self.get_new_session()
+            try:
+                # Normalize the date to just the date part (no time)
+                date_value = row['date']
+                if hasattr(date_value, 'date'):
+                    # If it's a datetime, get just the date
+                    date_value = datetime.combine(date_value.date(), datetime.min.time())
+                elif isinstance(date_value, str):
+                    # If it's a string, parse it
+                    date_value = datetime.strptime(date_value.split()[0], '%Y-%m-%d')
 
-                    label_dist = row.get('label_distribution', {})
-                    if isinstance(label_dist, dict):
-                        label_dist_json = json.dumps(label_dist)
-                    else:
-                        label_dist_json = str(label_dist)
+                label_dist = row.get('label_distribution', {})
+                if isinstance(label_dist, dict):
+                    label_dist_json = json.dumps(label_dist)
+                else:
+                    label_dist_json = str(label_dist)
 
-                    if existing:
-                        # Update existing record
-                        existing.sentiment_index = row['sentiment_index']
-                        existing.avg_compound = row['avg_compound']
-                        existing.avg_positive = row['avg_positive']
-                        existing.avg_negative = row['avg_negative']
-                        existing.avg_neutral = row['avg_neutral']
-                        existing.volatility = row['volatility']
-                        existing.momentum = row.get('momentum', 0.0)
-                        existing.article_count = row['article_count']
-                        existing.label_distribution = label_dist_json
-                    else:
-                        # Create new record
-                        index_record = DailyIndex(
-                            date=row['date'],
-                            sentiment_index=row['sentiment_index'],
-                            avg_compound=row['avg_compound'],
-                            avg_positive=row['avg_positive'],
-                            avg_negative=row['avg_negative'],
-                            avg_neutral=row['avg_neutral'],
-                            volatility=row['volatility'],
-                            momentum=row.get('momentum', 0.0),
-                            article_count=row['article_count'],
-                            label_distribution=label_dist_json
-                        )
-                        session.add(index_record)
+                # Query for existing record in this fresh session
+                existing = session.query(DailyIndex).filter(
+                    DailyIndex.date == date_value
+                ).first()
 
-            # Commit all changes at once after the no_autoflush block
-            session.commit()
-            print(f"Saved {len(daily_index_df)} daily index records to database")
-        except Exception as e:
-            session.rollback()
-            print(f"Error saving daily index: {e}")
-            raise e
-        finally:
-            session.close()
+                if existing:
+                    # Update existing record
+                    existing.sentiment_index = row['sentiment_index']
+                    existing.avg_compound = row['avg_compound']
+                    existing.avg_positive = row['avg_positive']
+                    existing.avg_negative = row['avg_negative']
+                    existing.avg_neutral = row['avg_neutral']
+                    existing.volatility = row['volatility']
+                    existing.momentum = row.get('momentum', 0.0)
+                    existing.article_count = row['article_count']
+                    existing.label_distribution = label_dist_json
+                else:
+                    # Create new record
+                    index_record = DailyIndex(
+                        date=date_value,
+                        sentiment_index=row['sentiment_index'],
+                        avg_compound=row['avg_compound'],
+                        avg_positive=row['avg_positive'],
+                        avg_negative=row['avg_negative'],
+                        avg_neutral=row['avg_neutral'],
+                        volatility=row['volatility'],
+                        momentum=row.get('momentum', 0.0),
+                        article_count=row['article_count'],
+                        label_distribution=label_dist_json
+                    )
+                    session.add(index_record)
+
+                # Commit this single row
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                print(f"Error saving daily index for date {date_value}: {e}")
+                raise e
+            finally:
+                session.close()
+
+        print(f"Saved {len(daily_index_df)} daily index records to database")
 
     def save_source_index(self, source_index_df, date=None):
         """
@@ -209,7 +221,7 @@ class SentimentDatabase:
                     'sentiment_index': latest.sentiment_index,
                     'avg_compound': latest.avg_compound,
                     'volatility': latest.volatility,
-                    'momentum': latest.momentum,
+                    'momentum': latest.momentum if latest.momentum is not None else 0.0,
                     'article_count': latest.article_count,
                     'label_distribution': json.loads(latest.label_distribution) if latest.label_distribution else {}
                 }
@@ -245,7 +257,7 @@ class SentimentDatabase:
                 'sentiment_index': r.sentiment_index,
                 'avg_compound': r.avg_compound,
                 'volatility': r.volatility,
-                'momentum': r.momentum,
+                'momentum': r.momentum if r.momentum is not None else 0.0,
                 'article_count': r.article_count
             } for r in records]
         except Exception as e:
