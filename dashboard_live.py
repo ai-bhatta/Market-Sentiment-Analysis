@@ -97,6 +97,9 @@ with st.sidebar:
 
     if st.button("Fetch Live News", type="primary"):
         with st.spinner("Fetching live financial news..."):
+            # Reset session before new operations
+            db.reset_session()
+
             # Use RSS feeds (no API keys needed for demo)
             df = fetcher.fetch_rss_fallback()
 
@@ -140,6 +143,8 @@ with st.sidebar:
             }
 
             with st.spinner("Fetching from multiple sources..."):
+                db.reset_session()
+
                 df = fetcher.fetch_all(api_keys=api_keys, days=7)
 
                 if not df.empty:
@@ -189,10 +194,12 @@ if page == "Dashboard":
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
+            momentum = latest.get('momentum', 0)
+            momentum_value = momentum if momentum is not None else 0
             st.metric(
                 label="Sentiment Index",
                 value=f"{latest['sentiment_index']:.2f}",
-                delta=f"{latest.get('momentum', 0):.2f}"
+                delta=f"{momentum_value:.2f}"
             )
 
         with col2:
