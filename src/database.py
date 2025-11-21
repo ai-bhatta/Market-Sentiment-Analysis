@@ -60,42 +60,22 @@ class SentimentDatabase:
 
     def __init__(self, db_path='sentiment_data.db'):
         """Initialize database connection"""
-        self.engine = create_engine(f'sqlite:///{db_path}', pool_pre_ping=True)
+        self.engine = create_engine(
+            f'sqlite:///{db_path}',
+            pool_pre_ping=True,
+            pool_recycle=3600,  # Recycle connections after 1 hour
+            connect_args={'check_same_thread': False}  # For SQLite threading
+        )
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
-        self._session = None
 
-    @property
-    def session(self):
-        """Get or create a session with automatic rollback on error"""
-        if self._session is None:
-            self._session = self.Session()
-        return self._session
-
-    def _handle_error(self, error):
-        """Handle database errors by rolling back and resetting the session"""
-        if self._session:
-            try:
-                self._session.rollback()
-            except Exception:
-                pass
-            # Reset the session completely after an error
-            self.reset_session()
-        raise error
+    def get_new_session(self):
+        """Create a brand new session - NEVER reuse"""
+        return self.Session()
 
     def reset_session(self):
-        """Close and reset the session"""
-        if not hasattr(self, '_session'):
-            # Session not initialized yet, nothing to reset
-            return
-
-        if self._session:
-            try:
-                self._session.close()
-            except Exception:
-                pass
-            finally:
-                self._session = None
+        """Deprecated - kept for backwards compatibility"""
+        pass  # No-op now, we don't store sessions anymore
 
     def save_sentiment_records(self, df):
         """
@@ -104,9 +84,8 @@ class SentimentDatabase:
         Args:
             df: DataFrame with sentiment analysis
         """
+        session = self.get_new_session()
         try:
-            # Reset session before write operations to ensure clean state
-            self.reset_session()
             records = []
             for _, row in df.iterrows():
                 record = SentimentRecord(
@@ -122,11 +101,14 @@ class SentimentDatabase:
                 )
                 records.append(record)
 
-            self.session.bulk_save_objects(records)
-            self.session.commit()
+            session.bulk_save_objects(records)
+            session.commit()
             print(f"Saved {len(records)} sentiment records to database")
         except Exception as e:
-            self._handle_error(e)
+            session.rollback()
+            raise e
+        finally:
+            session.close()
 
     def save_daily_index(self, daily_index_df):
         """
@@ -135,12 +117,11 @@ class SentimentDatabase:
         Args:
             daily_index_df: DataFrame with daily indices
         """
+        session = self.get_new_session()
         try:
-            # Reset session before write operations to ensure clean state
-            self.reset_session()
             for _, row in daily_index_df.iterrows():
                 # Check if record exists
-                existing = self.session.query(DailyIndex).filter_by(date=row['date']).first()
+                existing = session.query(DailyIndex).filter_by(date=row['date']).first()
 
                 label_dist = row.get('label_distribution', {})
                 if isinstance(label_dist, dict):
@@ -173,12 +154,15 @@ class SentimentDatabase:
                         article_count=row['article_count'],
                         label_distribution=label_dist_json
                     )
-                    self.session.add(index_record)
+                    session.add(index_record)
 
-            self.session.commit()
+            session.commit()
             print(f"Saved {len(daily_index_df)} daily index records to database")
         except Exception as e:
-            self._handle_error(e)
+            session.rollback()
+            raise e
+        finally:
+            session.close()
 
     def save_source_index(self, source_index_df, date=None):
         """
@@ -188,9 +172,8 @@ class SentimentDatabase:
             source_index_df: DataFrame with source indices
             date: Date for these indices
         """
+        session = self.get_new_session()
         try:
-            # Reset session before write operations to ensure clean state
-            self.reset_session()
             if date is None:
                 date = datetime.now()
 
@@ -202,19 +185,21 @@ class SentimentDatabase:
                     avg_compound=row['avg_compound'],
                     article_count=row['article_count']
                 )
-                self.session.add(index_record)
+                session.add(index_record)
 
-            self.session.commit()
+            session.commit()
             print(f"Saved {len(source_index_df)} source index records to database")
         except Exception as e:
-            self._handle_error(e)
+            session.rollback()
+            raise e
+        finally:
+            session.close()
 
     def get_latest_index(self):
         """Get the most recent sentiment index"""
+        session = self.get_new_session()
         try:
-            # Reset session before read operations to ensure clean state
-            self.reset_session()
-            latest = self.session.query(DailyIndex).order_by(DailyIndex.date.desc()).first()
+            latest = session.query(DailyIndex).order_by(DailyIndex.date.desc()).first()
             if latest:
                 return {
                     'date': latest.date.isoformat(),
@@ -227,10 +212,10 @@ class SentimentDatabase:
                 }
             return None
         except Exception as e:
-            # For read operations, just reset and return None instead of crashing
-            self.reset_session()
             print(f"Error in get_latest_index: {e}")
             return None
+        finally:
+            session.close()
 
     def get_historical_index(self, days=30):
         """
@@ -242,13 +227,12 @@ class SentimentDatabase:
         Returns:
             list: Historical index data
         """
+        session = self.get_new_session()
         try:
-            # Reset session before read operations to ensure clean state
-            self.reset_session()
             from datetime import timedelta
             start_date = datetime.now() - timedelta(days=days)
 
-            records = self.session.query(DailyIndex).filter(
+            records = session.query(DailyIndex).filter(
                 DailyIndex.date >= start_date
             ).order_by(DailyIndex.date.asc()).all()
 
@@ -261,20 +245,19 @@ class SentimentDatabase:
                 'article_count': r.article_count
             } for r in records]
         except Exception as e:
-            # For read operations, just reset and return empty list instead of crashing
-            self.reset_session()
             print(f"Error in get_historical_index: {e}")
             return []
+        finally:
+            session.close()
 
     def get_sentiment_by_source(self, days=7):
         """Get recent sentiment breakdown by source"""
+        session = self.get_new_session()
         try:
-            # Reset session before read operations to ensure clean state
-            self.reset_session()
             from datetime import timedelta
             start_date = datetime.now() - timedelta(days=days)
 
-            records = self.session.query(SourceIndex).filter(
+            records = session.query(SourceIndex).filter(
                 SourceIndex.date >= start_date
             ).order_by(SourceIndex.date.desc()).all()
 
@@ -286,17 +269,16 @@ class SentimentDatabase:
                 'article_count': r.article_count
             } for r in records]
         except Exception as e:
-            # For read operations, just reset and return empty list instead of crashing
-            self.reset_session()
             print(f"Error in get_sentiment_by_source: {e}")
             return []
+        finally:
+            session.close()
 
     def get_latest_records(self, limit=50):
         """Get most recent sentiment records"""
+        session = self.get_new_session()
         try:
-            # Reset session before read operations to ensure clean state
-            self.reset_session()
-            records = self.session.query(SentimentRecord).order_by(
+            records = session.query(SentimentRecord).order_by(
                 SentimentRecord.created_at.desc()
             ).limit(limit).all()
 
@@ -312,20 +294,14 @@ class SentimentDatabase:
                 'compound_score': r.compound_score
             } for r in records]
         except Exception as e:
-            # For read operations, just reset and return empty list instead of crashing
-            self.reset_session()
             print(f"Error in get_latest_records: {e}")
             return []
+        finally:
+            session.close()
 
     def close(self):
-        """Close database connection"""
-        if self._session:
-            try:
-                self._session.close()
-            except Exception:
-                pass
-            finally:
-                self._session = None
+        """Close database connection - no-op now since we don't store sessions"""
+        pass
 
 
 if __name__ == "__main__":
