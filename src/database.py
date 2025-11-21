@@ -1,15 +1,17 @@
+import os
+import json
+from datetime import datetime, timedelta
+
 from sqlalchemy import create_engine, Column, Integer, Float, String, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
-import json
 
 Base = declarative_base()
 
 
 class SentimentRecord(Base):
-    """Database model for sentiment analysis records"""
-    __tablename__ = 'sentiment_records'
+    """Database model for individual sentiment analysis records."""
+    __tablename__ = "sentiment_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     date = Column(DateTime, nullable=False)
@@ -25,8 +27,8 @@ class SentimentRecord(Base):
 
 
 class DailyIndex(Base):
-    """Database model for daily sentiment index"""
-    __tablename__ = 'daily_indices'
+    """Database model for daily sentiment index."""
+    __tablename__ = "daily_indices"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     date = Column(DateTime, unique=True, nullable=False)
@@ -43,8 +45,8 @@ class DailyIndex(Base):
 
 
 class SourceIndex(Base):
-    """Database model for source-specific sentiment index"""
-    __tablename__ = 'source_indices'
+    """Database model for source-specific sentiment index."""
+    __tablename__ = "source_indices"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     date = Column(DateTime, nullable=False)
@@ -56,136 +58,166 @@ class SourceIndex(Base):
 
 
 class SentimentDatabase:
-    """Database operations for sentiment data"""
+    """Database operations for sentiment data."""
 
-    def __init__(self, db_path='sentiment_data.db'):
-        """Initialize database connection"""
+    def __init__(self, db_path: str = "sentiment_data.db"):
+        """
+        Initialise database connection.
+
+        - Locally (no DATABASE_URL set): use a SQLite file (sentiment_data.db).
+        - On Streamlit Cloud (DATABASE_URL set): use that URL
+          (e.g. sqlite:///:memory: or a Postgres URL).
+        """
+        db_url = os.environ.get("DATABASE_URL")
+        if db_url:
+            engine_url = db_url
+        else:
+            engine_url = f"sqlite:///{db_path}"
+
+        connect_args = {}
+        if engine_url.startswith("sqlite"):
+            # Needed for SQLite with multiple threads (Streamlit)
+            connect_args["check_same_thread"] = False
+
         self.engine = create_engine(
-            f'sqlite:///{db_path}',
+            engine_url,
             pool_pre_ping=True,
-            pool_recycle=3600,  # Recycle connections after 1 hour
-            connect_args={'check_same_thread': False}  # For SQLite threading
+            pool_recycle=3600,
+            connect_args=connect_args,
         )
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
+    # -------------------------- internal helpers -------------------------- #
     def get_new_session(self):
-        """Create a brand new session - NEVER reuse"""
+        """Create a brand new session - NEVER reuse."""
         return self.Session()
 
     def reset_session(self):
-        """Deprecated - kept for backwards compatibility"""
-        pass  # No-op now, we don't store sessions anymore
+        """Deprecated - kept for backwards compatibility."""
+        pass
 
+    def _is_readonly_error(self, exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return "readonly" in msg or "read-only" in msg
+
+    # -------------------------- write operations -------------------------- #
     def save_sentiment_records(self, df):
         """
-        Save sentiment analysis results to database
+        Save sentiment analysis results to database.
 
         Args:
-            df: DataFrame with sentiment analysis
+            df: pandas.DataFrame with sentiment analysis results.
         """
         session = self.get_new_session()
         try:
             records = []
             for _, row in df.iterrows():
                 record = SentimentRecord(
-                    date=row.get('date', datetime.now()),
-                    source=row.get('source', 'Unknown'),
-                    headline=row.get('text', '')[:1000],  # Truncate if too long
-                    sentiment_label=row.get('sentiment_label', 'neutral'),
-                    sentiment_score=row.get('sentiment_score', 0.0),
-                    positive_score=row.get('positive_score', 0.0),
-                    negative_score=row.get('negative_score', 0.0),
-                    neutral_score=row.get('neutral_score', 0.0),
-                    compound_score=row.get('compound_score', 0.0)
+                    date=row.get("date", datetime.now()),
+                    source=row.get("source", "Unknown"),
+                    headline=row.get("text", "")[:1000],
+                    sentiment_label=row.get("sentiment_label", "neutral"),
+                    sentiment_score=row.get("sentiment_score", 0.0),
+                    positive_score=row.get("positive_score", 0.0),
+                    negative_score=row.get("negative_score", 0.0),
+                    neutral_score=row.get("neutral_score", 0.0),
+                    compound_score=row.get("compound_score", 0.0),
                 )
                 records.append(record)
 
-            session.bulk_save_objects(records)
-            session.commit()
-            print(f"Saved {len(records)} sentiment records to database")
+            if records:
+                session.bulk_save_objects(records)
+                session.commit()
+                print(f"Saved {len(records)} sentiment records to database")
         except Exception as e:
             session.rollback()
-            raise e
+            if self._is_readonly_error(e):
+                print(
+                    f"Warning: DB is read-only; skipping save_sentiment_records. "
+                    f"Error: {e}"
+                )
+            else:
+                raise
         finally:
             session.close()
 
     def save_daily_index(self, daily_index_df):
         """
-        Save daily sentiment indices to database
+        Save daily sentiment indices to database.
 
         Args:
-            daily_index_df: DataFrame with daily indices
+            daily_index_df: DataFrame with daily indices.
         """
         for _, row in daily_index_df.iterrows():
-            # Use a fresh session for each row to avoid conflicts
             session = self.get_new_session()
             try:
-                # Normalize the date to just the date part (no time)
-                date_value = row['date']
-                if hasattr(date_value, 'date'):
-                    # If it's a datetime, get just the date
-                    date_value = datetime.combine(date_value.date(), datetime.min.time())
+                date_value = row["date"]
+                if hasattr(date_value, "date"):
+                    date_value = datetime.combine(
+                        date_value.date(), datetime.min.time()
+                    )
                 elif isinstance(date_value, str):
-                    # If it's a string, parse it
-                    date_value = datetime.strptime(date_value.split()[0], '%Y-%m-%d')
+                    date_value = datetime.strptime(
+                        date_value.split()[0], "%Y-%m-%d"
+                    )
 
-                label_dist = row.get('label_distribution', {})
+                label_dist = row.get("label_distribution", {})
                 if isinstance(label_dist, dict):
                     label_dist_json = json.dumps(label_dist)
                 else:
                     label_dist_json = str(label_dist)
 
-                # Query for existing record in this fresh session
-                existing = session.query(DailyIndex).filter(
-                    DailyIndex.date == date_value
-                ).first()
+                existing = (
+                    session.query(DailyIndex)
+                    .filter(DailyIndex.date == date_value)
+                    .first()
+                )
 
                 if existing:
-                    # Update existing record
-                    existing.sentiment_index = row['sentiment_index']
-                    existing.avg_compound = row['avg_compound']
-                    existing.avg_positive = row['avg_positive']
-                    existing.avg_negative = row['avg_negative']
-                    existing.avg_neutral = row['avg_neutral']
-                    existing.volatility = row['volatility']
-                    existing.momentum = row.get('momentum', 0.0)
-                    existing.article_count = row['article_count']
+                    existing.sentiment_index = row["sentiment_index"]
+                    existing.avg_compound = row["avg_compound"]
+                    existing.avg_positive = row["avg_positive"]
+                    existing.avg_negative = row["avg_negative"]
+                    existing.avg_neutral = row["avg_neutral"]
+                    existing.volatility = row["volatility"]
+                    existing.momentum = row.get("momentum", 0.0)
+                    existing.article_count = row["article_count"]
                     existing.label_distribution = label_dist_json
                 else:
-                    # Create new record
                     index_record = DailyIndex(
                         date=date_value,
-                        sentiment_index=row['sentiment_index'],
-                        avg_compound=row['avg_compound'],
-                        avg_positive=row['avg_positive'],
-                        avg_negative=row['avg_negative'],
-                        avg_neutral=row['avg_neutral'],
-                        volatility=row['volatility'],
-                        momentum=row.get('momentum', 0.0),
-                        article_count=row['article_count'],
-                        label_distribution=label_dist_json
+                        sentiment_index=row["sentiment_index"],
+                        avg_compound=row["avg_compound"],
+                        avg_positive=row["avg_positive"],
+                        avg_negative=row["avg_negative"],
+                        avg_neutral=row["avg_neutral"],
+                        volatility=row["volatility"],
+                        momentum=row.get("momentum", 0.0),
+                        article_count=row["article_count"],
+                        label_distribution=label_dist_json,
                     )
                     session.add(index_record)
-                    
-                session.commit()
-        except Exception as e:
-            session.rollback()
-            msg = str(e).lower()
-            if "readonly" in msg or "read-only" in msg:
-                # Running in a read-only environment (e.g. Streamlit Cloud repo mount)
-                print("Warning: DB is read-only; skipping save_sentiment_records.")
-            else:
-                raise e
-        finally:
-            session.close()
 
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                print(f"Error saving daily index for date {date_value}: {e}")
+                if self._is_readonly_error(e):
+                    print(
+                        "Warning: DB is read-only; skipping remaining daily_index rows."
+                    )
+                    return
+                else:
+                    raise
+            finally:
+                session.close()
 
         print(f"Saved {len(daily_index_df)} daily index records to database")
 
     def save_source_index(self, source_index_df, date=None):
         """
-        Save source-specific sentiment indices
+        Save source-specific sentiment indices.
 
         Args:
             source_index_df: DataFrame with source indices
@@ -199,10 +231,10 @@ class SentimentDatabase:
             for _, row in source_index_df.iterrows():
                 index_record = SourceIndex(
                     date=date,
-                    source=row['source'],
-                    sentiment_index=row['sentiment_index'],
-                    avg_compound=row['avg_compound'],
-                    article_count=row['article_count']
+                    source=row["source"],
+                    sentiment_index=row["sentiment_index"],
+                    avg_compound=row["avg_compound"],
+                    article_count=row["article_count"],
                 )
                 session.add(index_record)
 
@@ -210,24 +242,38 @@ class SentimentDatabase:
             print(f"Saved {len(source_index_df)} source index records to database")
         except Exception as e:
             session.rollback()
-            raise e
+            if self._is_readonly_error(e):
+                print(
+                    f"Warning: DB is read-only; skipping save_source_index. Error: {e}"
+                )
+            else:
+                raise
         finally:
             session.close()
 
+    # -------------------------- read operations --------------------------- #
     def get_latest_index(self):
-        """Get the most recent sentiment index"""
+        """Get the most recent sentiment index as a dict, or None."""
         session = self.get_new_session()
         try:
-            latest = session.query(DailyIndex).order_by(DailyIndex.date.desc()).first()
+            latest = (
+                session.query(DailyIndex)
+                .order_by(DailyIndex.date.desc())
+                .first()
+            )
             if latest:
                 return {
-                    'date': latest.date.isoformat(),
-                    'sentiment_index': latest.sentiment_index,
-                    'avg_compound': latest.avg_compound,
-                    'volatility': latest.volatility,
-                    'momentum': latest.momentum if latest.momentum is not None else 0.0,
-                    'article_count': latest.article_count,
-                    'label_distribution': json.loads(latest.label_distribution) if latest.label_distribution else {}
+                    "date": latest.date.isoformat(),
+                    "sentiment_index": latest.sentiment_index,
+                    "avg_compound": latest.avg_compound,
+                    "volatility": latest.volatility,
+                    "momentum": latest.momentum
+                    if latest.momentum is not None
+                    else 0.0,
+                    "article_count": latest.article_count,
+                    "label_distribution": json.loads(latest.label_distribution)
+                    if latest.label_distribution
+                    else {},
                 }
             return None
         except Exception as e:
@@ -237,33 +283,28 @@ class SentimentDatabase:
         finally:
             session.close()
 
-    def get_historical_index(self, days=30):
-        """
-        Get historical sentiment index data
-
-        Args:
-            days: Number of days to retrieve
-
-        Returns:
-            list: Historical index data
-        """
+    def get_historical_index(self, days: int = 30):
+        """Get historical sentiment index data for the last `days` days."""
         session = self.get_new_session()
         try:
-            from datetime import timedelta
             start_date = datetime.now() - timedelta(days=days)
-
-            records = session.query(DailyIndex).filter(
-                DailyIndex.date >= start_date
-            ).order_by(DailyIndex.date.asc()).all()
-
-            return [{
-                'date': r.date.isoformat(),
-                'sentiment_index': r.sentiment_index,
-                'avg_compound': r.avg_compound,
-                'volatility': r.volatility,
-                'momentum': r.momentum if r.momentum is not None else 0.0,
-                'article_count': r.article_count
-            } for r in records]
+            records = (
+                session.query(DailyIndex)
+                .filter(DailyIndex.date >= start_date)
+                .order_by(DailyIndex.date.asc())
+                .all()
+            )
+            return [
+                {
+                    "date": r.date.isoformat(),
+                    "sentiment_index": r.sentiment_index,
+                    "avg_compound": r.avg_compound,
+                    "volatility": r.volatility,
+                    "momentum": r.momentum if r.momentum is not None else 0.0,
+                    "article_count": r.article_count,
+                }
+                for r in records
+            ]
         except Exception as e:
             session.rollback()
             print(f"Error in get_historical_index: {e}")
@@ -271,24 +312,27 @@ class SentimentDatabase:
         finally:
             session.close()
 
-    def get_sentiment_by_source(self, days=7):
-        """Get recent sentiment breakdown by source"""
+    def get_sentiment_by_source(self, days: int = 7):
+        """Get recent sentiment breakdown by news source."""
         session = self.get_new_session()
         try:
-            from datetime import timedelta
             start_date = datetime.now() - timedelta(days=days)
-
-            records = session.query(SourceIndex).filter(
-                SourceIndex.date >= start_date
-            ).order_by(SourceIndex.date.desc()).all()
-
-            return [{
-                'date': r.date.isoformat(),
-                'source': r.source,
-                'sentiment_index': r.sentiment_index,
-                'avg_compound': r.avg_compound,
-                'article_count': r.article_count
-            } for r in records]
+            records = (
+                session.query(SourceIndex)
+                .filter(SourceIndex.date >= start_date)
+                .order_by(SourceIndex.date.desc())
+                .all()
+            )
+            return [
+                {
+                    "date": r.date.isoformat(),
+                    "source": r.source,
+                    "sentiment_index": r.sentiment_index,
+                    "avg_compound": r.avg_compound,
+                    "article_count": r.article_count,
+                }
+                for r in records
+            ]
         except Exception as e:
             session.rollback()
             print(f"Error in get_sentiment_by_source: {e}")
@@ -296,25 +340,30 @@ class SentimentDatabase:
         finally:
             session.close()
 
-    def get_latest_records(self, limit=50):
-        """Get most recent sentiment records"""
+    def get_latest_records(self, limit: int = 50):
+        """Get most recent individual sentiment records."""
         session = self.get_new_session()
         try:
-            records = session.query(SentimentRecord).order_by(
-                SentimentRecord.created_at.desc()
-            ).limit(limit).all()
-
-            return [{
-                'date': r.date.isoformat(),
-                'source': r.source,
-                'headline': r.headline,
-                'sentiment_label': r.sentiment_label,
-                'sentiment_score': r.sentiment_score,
-                'positive_score': r.positive_score,
-                'negative_score': r.negative_score,
-                'neutral_score': r.neutral_score,
-                'compound_score': r.compound_score
-            } for r in records]
+            records = (
+                session.query(SentimentRecord)
+                .order_by(SentimentRecord.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "date": r.date.isoformat(),
+                    "source": r.source,
+                    "headline": r.headline,
+                    "sentiment_label": r.sentiment_label,
+                    "sentiment_score": r.sentiment_score,
+                    "positive_score": r.positive_score,
+                    "negative_score": r.negative_score,
+                    "neutral_score": r.neutral_score,
+                    "compound_score": r.compound_score,
+                }
+                for r in records
+            ]
         except Exception as e:
             session.rollback()
             print(f"Error in get_latest_records: {e}")
@@ -323,32 +372,33 @@ class SentimentDatabase:
             session.close()
 
     def close(self):
-        """Close database connection - no-op now since we don't store sessions"""
+        """Close database connection - no-op with SQLAlchemy sessions."""
         pass
 
 
 if __name__ == "__main__":
-    # Test database operations
-    db = SentimentDatabase('test_sentiment.db')
-
-    print("Database tables created successfully!")
-
-    # Test data
+    # Simple local test
     import pandas as pd
 
-    test_df = pd.DataFrame([{
-        'date': datetime.now(),
-        'source': 'Test',
-        'text': 'Test headline',
-        'sentiment_label': 'positive',
-        'sentiment_score': 0.95,
-        'positive_score': 0.95,
-        'negative_score': 0.02,
-        'neutral_score': 0.03,
-        'compound_score': 0.93
-    }])
+    db = SentimentDatabase("test_sentiment.db")
+    print("Database tables created successfully!")
+
+    test_df = pd.DataFrame(
+        [
+            {
+                "date": datetime.now(),
+                "source": "Test",
+                "text": "Test headline",
+                "sentiment_label": "positive",
+                "sentiment_score": 0.95,
+                "positive_score": 0.95,
+                "negative_score": 0.02,
+                "neutral_score": 0.03,
+                "compound_score": 0.93,
+            }
+        ]
+    )
 
     db.save_sentiment_records(test_df)
     print("Test record saved!")
-
     db.close()
