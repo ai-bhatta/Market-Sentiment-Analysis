@@ -37,20 +37,20 @@ Project_MSA/
 │   └── reuters_headlines.csv   # 9.5 MB
 ├── src/
 │   ├── __init__.py
-│   ├── data_loader.py          # Load and preprocess datasets
-│   ├── sentiment_analyzer.py   # FinBERT sentiment analysis
-│   ├── sentiment_index.py      # Index calculation logic
-│   ├── database.py             # SQLite database operations
-│   ├── news_fetcher.py         # Live news fetching from APIs
-│   └── api.py                  # FastAPI endpoints
-├── dashboard_live.py           # Live Streamlit dashboard
-├── .env.example                # Environment variables template
-├── requirements.txt            # Python dependencies
-├── Dockerfile                  # Docker container configuration
-├── docker-compose.yml          # Docker Compose setup
-├── run.sh                      # Unix/Linux/Mac execution script
-├── run.bat                     # Windows execution script
-└── sentiment_data.db           # SQLite database (created on first run)
+│   ├── data_loader.py          
+│   ├── sentiment_analyzer.py  
+│   ├── sentiment_index.py      
+│   ├── database.py             
+│   ├── news_fetcher.py         
+│   └── api.py                  
+├── dashboard_live.py           
+├── .env.example                
+├── requirements.txt            
+├── Dockerfile                  
+├── docker-compose.yml          
+├── run.sh                      
+├── run.bat                     
+└── sentiment_data.db           
 ```
 
 ## How to Run This Project Locally
