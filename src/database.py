@@ -80,12 +80,17 @@ class SentimentDatabase:
 
     def reset_session(self):
         """Close and reset the session"""
+        if not hasattr(self, '_session'):
+            # Session not initialized yet, nothing to reset
+            return
+
         if self._session:
             try:
                 self._session.close()
             except Exception:
                 pass
-            self._session = None
+            finally:
+                self._session = None
 
     def save_sentiment_records(self, df):
         """
