@@ -31,10 +31,10 @@ The project is currently operational with the following components:
 
 ```
 Project_MSA/
-├── dataset/                    # Historical news data (11.8 MB total)
-│   ├── cnbc_headlines.csv      # 666 KB
-│   ├── guardian_headlines.csv  # 1.4 MB
-│   └── reuters_headlines.csv   # 9.5 MB
+├── dataset/                    
+│   ├── cnbc_headlines.csv      
+│   ├── guardian_headlines.csv  
+│   └── reuters_headlines.csv   
 ├── src/
 │   ├── __init__.py
 │   ├── data_loader.py          
@@ -61,7 +61,7 @@ Project_MSA/
 - **pip**: Python package installer
 - **Git**: To clone the repository (optional)
 - **Disk Space**: ~2 GB for models and dependencies
-- **RAM**: Minimum 4 GB (8 GB recommended for faster processing)
+- **RAM**: Minimum 4 GB (8 GB is recommended for faster processing)
 
 ### Option 1: Quick Start with Scripts (Recommended)
 
