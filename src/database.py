@@ -167,15 +167,19 @@ class SentimentDatabase:
                         label_distribution=label_dist_json
                     )
                     session.add(index_record)
-
-                # Commit this single row
+                    
                 session.commit()
-            except Exception as e:
-                session.rollback()
-                print(f"Error saving daily index for date {date_value}: {e}")
+        except Exception as e:
+            session.rollback()
+            msg = str(e).lower()
+            if "readonly" in msg or "read-only" in msg:
+                # Running in a read-only environment (e.g. Streamlit Cloud repo mount)
+                print("Warning: DB is read-only; skipping save_sentiment_records.")
+            else:
                 raise e
-            finally:
-                session.close()
+        finally:
+            session.close()
+
 
         print(f"Saved {len(daily_index_df)} daily index records to database")
 
