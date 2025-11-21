@@ -73,9 +73,14 @@ class SentimentDatabase:
         return self._session
 
     def _handle_error(self, error):
-        """Handle database errors by rolling back the session"""
+        """Handle database errors by rolling back and resetting the session"""
         if self._session:
-            self._session.rollback()
+            try:
+                self._session.rollback()
+            except Exception:
+                pass
+            # Reset the session completely after an error
+            self.reset_session()
         raise error
 
     def reset_session(self):
@@ -100,6 +105,8 @@ class SentimentDatabase:
             df: DataFrame with sentiment analysis
         """
         try:
+            # Reset session before write operations to ensure clean state
+            self.reset_session()
             records = []
             for _, row in df.iterrows():
                 record = SentimentRecord(
@@ -129,6 +136,8 @@ class SentimentDatabase:
             daily_index_df: DataFrame with daily indices
         """
         try:
+            # Reset session before write operations to ensure clean state
+            self.reset_session()
             for _, row in daily_index_df.iterrows():
                 # Check if record exists
                 existing = self.session.query(DailyIndex).filter_by(date=row['date']).first()
@@ -180,6 +189,8 @@ class SentimentDatabase:
             date: Date for these indices
         """
         try:
+            # Reset session before write operations to ensure clean state
+            self.reset_session()
             if date is None:
                 date = datetime.now()
 
@@ -201,6 +212,8 @@ class SentimentDatabase:
     def get_latest_index(self):
         """Get the most recent sentiment index"""
         try:
+            # Reset session before read operations to ensure clean state
+            self.reset_session()
             latest = self.session.query(DailyIndex).order_by(DailyIndex.date.desc()).first()
             if latest:
                 return {
@@ -214,7 +227,10 @@ class SentimentDatabase:
                 }
             return None
         except Exception as e:
-            self._handle_error(e)
+            # For read operations, just reset and return None instead of crashing
+            self.reset_session()
+            print(f"Error in get_latest_index: {e}")
+            return None
 
     def get_historical_index(self, days=30):
         """
@@ -227,6 +243,8 @@ class SentimentDatabase:
             list: Historical index data
         """
         try:
+            # Reset session before read operations to ensure clean state
+            self.reset_session()
             from datetime import timedelta
             start_date = datetime.now() - timedelta(days=days)
 
@@ -243,11 +261,16 @@ class SentimentDatabase:
                 'article_count': r.article_count
             } for r in records]
         except Exception as e:
-            self._handle_error(e)
+            # For read operations, just reset and return empty list instead of crashing
+            self.reset_session()
+            print(f"Error in get_historical_index: {e}")
+            return []
 
     def get_sentiment_by_source(self, days=7):
         """Get recent sentiment breakdown by source"""
         try:
+            # Reset session before read operations to ensure clean state
+            self.reset_session()
             from datetime import timedelta
             start_date = datetime.now() - timedelta(days=days)
 
@@ -263,11 +286,16 @@ class SentimentDatabase:
                 'article_count': r.article_count
             } for r in records]
         except Exception as e:
-            self._handle_error(e)
+            # For read operations, just reset and return empty list instead of crashing
+            self.reset_session()
+            print(f"Error in get_sentiment_by_source: {e}")
+            return []
 
     def get_latest_records(self, limit=50):
         """Get most recent sentiment records"""
         try:
+            # Reset session before read operations to ensure clean state
+            self.reset_session()
             records = self.session.query(SentimentRecord).order_by(
                 SentimentRecord.created_at.desc()
             ).limit(limit).all()
@@ -284,7 +312,10 @@ class SentimentDatabase:
                 'compound_score': r.compound_score
             } for r in records]
         except Exception as e:
-            self._handle_error(e)
+            # For read operations, just reset and return empty list instead of crashing
+            self.reset_session()
+            print(f"Error in get_latest_records: {e}")
+            return []
 
     def close(self):
         """Close database connection"""
