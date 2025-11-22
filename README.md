@@ -2,6 +2,8 @@
 
 A real-time market sentiment analysis tool that fetches live financial news and processes it using FinBERT to generate an aggregated sentiment index. The system provides both historical analysis of news datasets and live sentiment tracking with an interactive dashboard.
 
+You can access this project [Here!](https://market-sentiment-analysis-aimyd.streamlit.app/). Alternatively, you can run it locally on your system by following the instructions provided below.
+
 ## Features
 
 - **Live News Fetching**: Real-time news from multiple financial sources (NewsAPI, NewsData.io, and RSS feeds)
@@ -241,10 +243,6 @@ This project uses [FinBERT](https://huggingface.co/ProsusAI/finbert), a BERT mod
 - **Neutral**: Factual or balanced information
 
 The sentiment index is calculated as: `(Positive - Negative) * 100`, ranging from -100 (extremely bearish) to +100 (extremely bullish).
-
-## Contributing
-
-This is an academic project for Year 4 university coursework. Contributions, suggestions, and feedback are welcome.
 
 ## License
 
