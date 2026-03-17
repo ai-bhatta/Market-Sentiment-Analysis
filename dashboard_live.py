@@ -39,15 +39,17 @@ st.markdown("""
         margin: 10px 0;
     }
     .financial-warning {
-        background-color: #fff3cd;
-        border: 2px solid #ffc107;
+        background-color: #d80000;
+        border: 2px solid #b30000;
+        color: #ffffff;
         padding: 15px;
         border-radius: 5px;
         margin: 10px 0;
     }
     .financial-success {
-        background-color: #d4edda;
-        border: 2px solid #28a745;
+        background-color: #059e00;
+        border: 2px solid #047a00;
+        color: #ffffff;
         padding: 15px;
         border-radius: 5px;
         margin: 10px 0;
